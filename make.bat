@@ -1,10 +1,8 @@
 @echo off
-REM 获取WSL用户名
-for /f "delims=" %%i in ('wsl whoami') do set WSLUSER=%%i
-@echo off
+chcp 65001 >nul
 REM 动态检测WSL用户名（避免硬编码导致找不到用户）
 for /f "delims=" %%i in ('wsl whoami') do set WSLUSER=%%i
-echo Detected WSL user: %WSLUSER%
+echo 检测到 WSL 用户: %WSLUSER%
 
 REM 删除WSL下旧的YinxuanLoaderPkg并创建目标目录
 wsl -u %WSLUSER% -- rm -rf /home/%WSLUSER%/edk2/YinxuanLoaderPkg
@@ -29,4 +27,4 @@ REM 拷贝生成的Loader.efi回本地Build目录
 if not exist Build mkdir Build
 wsl -u %WSLUSER% -- cp /home/%WSLUSER%/edk2/Build/YinxuanLoaderX64/DEBUG_GCC5/X64/Loader.efi /mnt/c/Users/%USERNAME%/Desktop/YinxuanLoaderPkg/Build/Loader.efi
 
-echo Build completed: Loader.efi copied to Build directory.
+echo 构建完成：Loader.efi 已复制到 Build 目录。
