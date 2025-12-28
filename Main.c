@@ -127,21 +127,42 @@ EFI_STATUS EFIAPI UefiMain(
   Print(L"YinxuanLoader:Wellcome to YinxuanLoader's World!\n");
   Print(L"This UEFI BIOS boot was created by Xi Yinxuan, a student at No.1 High School in Juancheng County, Heze City, Shandong Province, China, and he is just a 14-year-old middle school student!\n");
   Print(L"Preparing to save memory map...\n");
-  //建立内存映射
-  CHAR8 memmap_buf[4096 * 16];
-  struct MemoryMap memmap = {sizeof(memmap_buf), memmap_buf, 0, 0, 0, 0};
-  GetMemoryMap(&memmap);
-  //打开根目录，并创建memmap文件
-  EFI_FILE_PROTOCOL* root_dir;
-  OpenRootDir(image_handle, &root_dir);
+  // 动态分配内存映射缓冲区
+  UINTN memmap_buf_size = 4096 * 16;
+  VOID* memmap_buf = NULL;
+  EFI_STATUS status;
+  while (1) {
+    status = gBS->AllocatePool(EfiLoaderData, memmap_buf_size, &memmap_buf);
+    if (EFI_ERROR(status)) {
+      Print(L"Failed to allocate memory for memmap_buf\n");
+      return status;
+    }
+    struct MemoryMap memmap = {memmap_buf_size, memmap_buf, 0, 0, 0, 0};
+    status = GetMemoryMap(&memmap);
+    if (status == EFI_BUFFER_TOO_SMALL) {
+      gBS->FreePool(memmap_buf);
+      memmap_buf_size *= 2;
+      continue;
+    } else if (EFI_ERROR(status)) {
+      Print(L"GetMemoryMap failed: %r\n", status);
+      gBS->FreePool(memmap_buf);
+      return status;
+    }
+    //打开根目录，并创建memmap文件
+    EFI_FILE_PROTOCOL* root_dir;
+    OpenRootDir(image_handle, &root_dir);
 
-  EFI_FILE_PROTOCOL* memmap_file;
-  root_dir->Open(
-      root_dir, &memmap_file, L"\\memmap",
-      EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE, 0);
+    EFI_FILE_PROTOCOL* memmap_file;
+    root_dir->Open(
+        root_dir, &memmap_file, L"\\memmap.csv",
+        EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE, 0);
 
-  SaveMemoryMap(&memmap, memmap_file);
-  memmap_file->Close(memmap_file);
+    SaveMemoryMap(&memmap, memmap_file);
+    memmap_file->Close(memmap_file);
+
+    gBS->FreePool(memmap_buf);
+    break;
+  }
 
   Print(L"YinxuanLoader: All done\n");
 
