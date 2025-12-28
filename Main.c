@@ -127,122 +127,98 @@ EFI_STATUS EFIAPI UefiMain(
     EFI_SYSTEM_TABLE *system_table) {
   Print(L"YinxuanLoader:Wellcome to YinxuanLoader's World!\n");
   Print(L"This UEFI BIOS boot was created by Xi Yinxuan, a student at No.1 High School in Juancheng County, Heze City, Shandong Province, China, and he is just a 14-year-old middle school student!\n");
-  Print(L"Preparing to save memory map...\n");
+  Print(L"YinxuanLoader:Preparing to save memory map...\n");
   // 动态分配内存映射缓冲区
   UINTN memmap_buf_size = 4096 * 16;
   VOID* memmap_buf = NULL;
   EFI_STATUS status;
+  struct MemoryMap memmap;
+  EFI_FILE_PROTOCOL* root_dir = NULL;
   while (1) {
-    // 动态分配内存映射缓冲区
     status = gBS->AllocatePool(EfiLoaderData, memmap_buf_size, &memmap_buf);
     if (EFI_ERROR(status)) {
-      Print(L"分配内存映射缓冲区失败\n");
+      Print(L"Failed to allocate memory for memmap_buf\n");
       return status;
     }
-    struct MemoryMap memmap = {memmap_buf_size, memmap_buf, 0, 0, 0, 0};
+    memmap.buffer_size = memmap_buf_size;
+    memmap.buffer = memmap_buf;
+    memmap.map_size = 0;
+    memmap.map_key = 0;
+    memmap.descriptor_size = 0;
+    memmap.descriptor_version = 0;
     status = GetMemoryMap(&memmap);
     if (status == EFI_BUFFER_TOO_SMALL) {
       gBS->FreePool(memmap_buf);
       memmap_buf_size *= 2;
       continue;
     } else if (EFI_ERROR(status)) {
-      Print(L"获取内存映射失败: %r\n", status);
+      Print(L"GetMemoryMap failed: %r\n", status);
       gBS->FreePool(memmap_buf);
       return status;
     }
-    // 打开根目录，并创建memmap.csv文件
-    EFI_FILE_PROTOCOL* root_dir;
+    //打开根目录，并创建memmap文件
     OpenRootDir(image_handle, &root_dir);
 
     EFI_FILE_PROTOCOL* memmap_file;
     root_dir->Open(
-        root_dir, &memmap_file, L"\\memmap.csv",
-        EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE, 0);
+      root_dir, &memmap_file, L"\\memmap.csv",
+      EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE | EFI_FILE_MODE_CREATE, 0);
 
     SaveMemoryMap(&memmap, memmap_file);
     memmap_file->Close(memmap_file);
 
-    // ===== 新增功能：加载kernel.elf并跳转 =====
-    // 1. 打开kernel.elf文件
-    EFI_FILE_PROTOCOL* kernel_file;
-    status = root_dir->Open(
-        root_dir, &kernel_file, L"\\kernel.elf",
-        EFI_FILE_MODE_READ, 0);
-    if (EFI_ERROR(status)) {
-      Print(L"未找到kernel.elf，跳过内核加载。\n");
-      gBS->FreePool(memmap_buf);
-      break;
-    }
-
-    // 2. 获取kernel.elf文件大小
-    UINTN file_info_size = sizeof(EFI_FILE_INFO) + sizeof(CHAR16) * 12;
-    UINT8 file_info_buffer[file_info_size];
-    status = kernel_file->GetInfo(
-        kernel_file, &gEfiFileInfoGuid,
-        &file_info_size, file_info_buffer);
-    if (EFI_ERROR(status)) {
-      Print(L"获取kernel.elf文件信息失败: %r\n", status);
-      kernel_file->Close(kernel_file);
-      gBS->FreePool(memmap_buf);
-      break;
-    }
-    EFI_FILE_INFO* file_info = (EFI_FILE_INFO*)file_info_buffer;
-    UINTN kernel_file_size = file_info->FileSize;
-
-    // 3. 分配内存并读取kernel.elf内容
-    EFI_PHYSICAL_ADDRESS kernel_base_addr = 0x100000; // 1MB
-    status = gBS->AllocatePages(
-        AllocateAddress, EfiLoaderData,
-        (kernel_file_size + 0xfff) / 0x1000, &kernel_base_addr);
-    if (EFI_ERROR(status)) {
-      Print(L"分配内存给kernel.elf失败: %r\n", status);
-      kernel_file->Close(kernel_file);
-      gBS->FreePool(memmap_buf);
-      break;
-    }
-    status = kernel_file->Read(kernel_file, &kernel_file_size, (VOID*)kernel_base_addr);
-    if (EFI_ERROR(status)) {
-      Print(L"读取kernel.elf失败: %r\n", status);
-      kernel_file->Close(kernel_file);
-      gBS->FreePages(kernel_base_addr, (kernel_file_size + 0xfff) / 0x1000);
-      gBS->FreePool(memmap_buf);
-      break;
-    }
-    Print(L"内核已加载: 地址=0x%0lx, 大小=%lu字节\n", kernel_base_addr, kernel_file_size);
-    kernel_file->Close(kernel_file);
-
-    // 4. 退出BootServices，重试机制
-    status = gBS->ExitBootServices(image_handle, memmap.map_key);
-    if (EFI_ERROR(status)) {
-      Print(L"第一次ExitBootServices失败，尝试刷新内存映射并重试...\n");
-      status = GetMemoryMap(&memmap);
-      if (EFI_ERROR(status)) {
-        Print(L"刷新内存映射失败: %r\n", status);
-        gBS->FreePages(kernel_base_addr, (kernel_file_size + 0xfff) / 0x1000);
-        gBS->FreePool(memmap_buf);
-        break;
-      }
-      status = gBS->ExitBootServices(image_handle, memmap.map_key);
-      if (EFI_ERROR(status)) {
-        Print(L"再次ExitBootServices失败: %r\n", status);
-        gBS->FreePages(kernel_base_addr, (kernel_file_size + 0xfff) / 0x1000);
-        gBS->FreePool(memmap_buf);
-        break;
-      }
-    }
-
-    // 5. 跳转到kernel.elf入口地址
-    UINT64 entry_addr = *(UINT64*)(kernel_base_addr + 24); // ELF64 header e_entry
-    Print(L"跳转到内核入口: 0x%0lx\n", entry_addr);
-    typedef void EntryPointType(void);
-    EntryPointType* entry_point = (EntryPointType*)entry_addr;
-    entry_point();
-
-    // 理论上不会返回，若返回则释放内存
-    gBS->FreePages(kernel_base_addr, (kernel_file_size + 0xfff) / 0x1000);
     gBS->FreePool(memmap_buf);
     break;
   }
+  Print(L"YinxuanLoader: Memory map saved successfully.\n");
+  // #@@range_begin(read_kernel)
+
+    EFI_FILE_PROTOCOL* kernel_file;
+    root_dir->Open(
+      root_dir, &kernel_file, L"\\kernel.elf",
+      EFI_FILE_MODE_READ, 0);
+
+    UINTN file_info_size = sizeof(EFI_FILE_INFO) + sizeof(CHAR16) * 12;
+    UINT8 file_info_buffer[sizeof(EFI_FILE_INFO) + sizeof(CHAR16) * 12];
+    kernel_file->GetInfo(
+      kernel_file, &gEfiFileInfoGuid,
+      &file_info_size, file_info_buffer);
+
+    EFI_FILE_INFO* file_info = (EFI_FILE_INFO*)file_info_buffer;
+    UINTN kernel_file_size = file_info->FileSize;
+
+  EFI_PHYSICAL_ADDRESS kernel_base_addr = 0x100000;
+  gBS->AllocatePages(
+      AllocateAddress, EfiLoaderData,
+      (kernel_file_size + 0xfff) / 0x1000, &kernel_base_addr);
+  kernel_file->Read(kernel_file, &kernel_file_size, (VOID*)kernel_base_addr);
+  Print(L"Kernel: 0x%0lx (%lu bytes)\n", kernel_base_addr, kernel_file_size);
+  // #@@range_end(read_kernel)
+
+  // #@@range_begin(exit_bs)
+  // EFI_STATUS status; // 已在前面声明
+  status = gBS->ExitBootServices(image_handle, memmap.map_key);
+  if (EFI_ERROR(status)) {
+    status = GetMemoryMap(&memmap);
+    if (EFI_ERROR(status)) {
+      Print(L"YinxuanLoader:failed to get memory map: %r\n", status);
+      while (1);
+    }
+    status = gBS->ExitBootServices(image_handle, memmap.map_key);
+    if (EFI_ERROR(status)) {
+      Print(L"YinxuanLoader:Could not exit boot service: %r\n", status);
+      while (1);
+    }
+  }
+  // #@@range_end(exit_bs)
+
+  // #@@range_begin(call_kernel)
+  UINT64 entry_addr = *(UINT64*)(kernel_base_addr + 24);
+
+  typedef void EntryPointType(void);
+  EntryPointType* entry_point = (EntryPointType*)entry_addr;
+  entry_point();
+  // #@@range_end(call_kernel)
 
   Print(L"YinxuanLoader: All done\n");
 
