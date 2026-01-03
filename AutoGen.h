@@ -1,0 +1,39 @@
+#ifndef _AUTOGEN_H_
+#define _AUTOGEN_H_
+
+#include <Base.h>
+#include <Library/PcdLib.h>
+#include <Library/DebugLib.h>
+
+#define CONST const
+
+// Common GUIDs
+extern GUID gEfiGlobalVariableGuid;
+extern GUID gEfiFileInfoGuid;
+extern GUID gEfiGraphicsOutputProtocolGuid;
+extern GUID gEfiSimpleFileSystemProtocolGuid;
+extern GUID gEfiLoadedImageProtocolGuid;
+extern GUID gEfiDevicePathProtocolGuid;
+
+// PCD Definitions
+#define _PCD_GET_MODE_32_PcdMaximumUnicodeStringLength 1000000
+#define _PCD_GET_MODE_32_PcdMaximumAsciiStringLength 1000000
+#define _PCD_GET_MODE_32_PcdMaximumLinkedListLength 1000000
+#define _PCD_GET_MODE_32_PcdSpinLockTimeout 10000000
+#define _PCD_GET_MODE_32_PcdDebugPropertyMask 0x2F
+#define _PCD_GET_MODE_32_PcdDebugPrintErrorLevel 0x80000000
+#define _PCD_GET_MODE_32_PcdFixedDebugPrintErrorLevel 0xFFFFFFFF
+#define _PCD_GET_MODE_8_PcdDebugClearMemoryValue 0xAF
+#define _PCD_GET_MODE_8_PcdDebugPropertyMask 0x2F
+#define _PCD_GET_MODE_32_PcdUefiLibMaxPrintBufferSize 320
+
+#define _PCD_GET_MODE_BOOL_PcdDriverDiagnosticsDisable TRUE
+#define _PCD_GET_MODE_BOOL_PcdDriverDiagnostics2Disable TRUE
+#define _PCD_GET_MODE_BOOL_PcdComponentNameDisable TRUE
+#define _PCD_GET_MODE_BOOL_PcdComponentName2Disable TRUE
+#define _PCD_GET_MODE_BOOL_PcdUgaConsumeSupport FALSE
+#define _PCD_GET_MODE_BOOL_PcdVerifyNodeInList FALSE
+#define _PCD_GET_MODE_8_PcdSpeculationBarrierType 0x0
+#define _PCD_GET_MODE_32_PcdMaximumDevicePathNodeCount 0
+
+#endif
