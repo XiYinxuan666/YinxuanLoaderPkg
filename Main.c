@@ -152,41 +152,52 @@ EFI_STATUS OpenGOP(EFI_HANDLE image_handle,
   return EFI_SUCCESS;
 }
 
-// 绘制矩形函数
+// ---------------------------------------------------------
+// 双缓冲支持
+// ---------------------------------------------------------
+EFI_GRAPHICS_OUTPUT_BLT_PIXEL* gBackBuffer = NULL;
+UINT32 gBackBufferWidth = 0;
+UINT32 gBackBufferHeight = 0;
+BOOLEAN gUseBackBuffer = FALSE;
+
+void InitBackBuffer(UINT32 width, UINT32 height) {
+  if (gBackBuffer) {
+    gBS->FreePool(gBackBuffer);
+  }
+  gBackBufferWidth = width;
+  gBackBufferHeight = height;
+  gBS->AllocatePool(EfiLoaderData, width * height * sizeof(EFI_GRAPHICS_OUTPUT_BLT_PIXEL), (VOID**)&gBackBuffer);
+}
+
+void SyncBackBuffer(EFI_GRAPHICS_OUTPUT_PROTOCOL* gop) {
+  if (gBackBuffer) {
+    gop->Blt(gop, gBackBuffer, EfiBltBufferToVideo, 0, 0, 0, 0, gBackBufferWidth, gBackBufferHeight, 0);
+  }
+}
+
+// 绘制矩形函数 (支持双缓冲和硬件加速)
 void DrawRect(EFI_GRAPHICS_OUTPUT_PROTOCOL* gop,
               UINT32 x, UINT32 y, UINT32 w, UINT32 h,
               EFI_GRAPHICS_OUTPUT_BLT_PIXEL color) {
-  EFI_GRAPHICS_OUTPUT_MODE_INFORMATION* info = gop->Mode->Info;
-
-  // 如果是 PixelBltOnly 或 PixelBitMask，强制使用 Blt 函数
-  if (info->PixelFormat == PixelBltOnly ||
-      info->PixelFormat == PixelBitMask) {
-    gop->Blt(gop, &color, EfiBltVideoFill, 0, 0, x, y, w, h, 0);
-    return;
-  }
-
-  // 对于线性帧缓冲模型（RGB/BGR），直接写内存
-  UINT32 pixel_size = 4; // 32-bit color
-  UINT8* base = (UINT8*)gop->Mode->FrameBufferBase;
   
-  for (UINT32 dy = 0; dy < h; ++dy) {
-    for (UINT32 dx = 0; dx < w; ++dx) {
-      UINT32 index = (y + dy) * info->PixelsPerScanLine + (x + dx);
-      UINT8* p = base + (index * pixel_size);
-      
-      if (info->PixelFormat == PixelRedGreenBlueReserved8BitPerColor) {
-        p[0] = color.Red;
-        p[1] = color.Green;
-        p[2] = color.Blue;
-        p[3] = color.Reserved;
-      } else if (info->PixelFormat == PixelBlueGreenRedReserved8BitPerColor) {
-        p[0] = color.Blue;
-        p[1] = color.Green;
-        p[2] = color.Red;
-        p[3] = color.Reserved;
-      }
-    }
+  // 如果启用了双缓冲且缓冲区存在
+  if (gUseBackBuffer && gBackBuffer) {
+     if (x >= gBackBufferWidth || y >= gBackBufferHeight) return;
+     // 裁剪边界
+     UINT32 draw_w = (x + w > gBackBufferWidth) ? (gBackBufferWidth - x) : w;
+     UINT32 draw_h = (y + h > gBackBufferHeight) ? (gBackBufferHeight - y) : h;
+     
+     for (UINT32 j = 0; j < draw_h; j++) {
+       for (UINT32 i = 0; i < draw_w; i++) {
+         gBackBuffer[(y + j) * gBackBufferWidth + (x + i)] = color;
+       }
+     }
+     return;
   }
+
+  // 直接绘制到屏幕：使用 Blt VideoFill (硬件加速)
+  // 这比逐像素写 FrameBuffer 快得多，且兼容所有 PixelFormat
+  gop->Blt(gop, &color, EfiBltVideoFill, 0, 0, x, y, w, h, 0);
 }
 
 // 辅助函数：创建颜色
@@ -229,15 +240,28 @@ double Cos(double x) {
   return Sin(x + PI / 2);
 }
 
-// 绘制实心圆 (使用 Blt 填充小矩形模拟，效率一般但兼容性好)
+// 绘制实心圆 (优化版：使用扫描线绘制)
 void DrawCircleFilled(EFI_GRAPHICS_OUTPUT_PROTOCOL* gop,
                       int cx, int cy, int r,
                       EFI_GRAPHICS_OUTPUT_BLT_PIXEL color) {
   for (int y = -r; y <= r; y++) {
+    // 简单的扫描线算法：找到当前 y 对应的 x 范围
+    int start_x = 0;
+    int width = 0;
+    
     for (int x = -r; x <= r; x++) {
       if (x * x + y * y <= r * r) {
-        gop->Blt(gop, &color, EfiBltVideoFill, 0, 0, cx + x, cy + y, 1, 1, 0);
+        if (width == 0) start_x = x;
+        width++;
+      } else if (width > 0) {
+        // 已经离开圆内部
+        break; 
       }
+    }
+    
+    if (width > 0) {
+      // 绘制一条水平线 (使用 DrawRect，支持缓冲或硬件加速)
+      DrawRect(gop, cx + start_x, cy + y, width, 1, color);
     }
   }
 }
@@ -346,6 +370,10 @@ void DrawDesktop(EFI_GRAPHICS_OUTPUT_PROTOCOL* gop) {
   UINT32 width = gop->Mode->Info->HorizontalResolution;
   UINT32 height = gop->Mode->Info->VerticalResolution;
 
+  // 初始化双缓冲
+  InitBackBuffer(width, height);
+  gUseBackBuffer = TRUE;
+
   // 1. 绘制深红色背景
   // Crimson: RGB(220, 20, 60)
   EFI_GRAPHICS_OUTPUT_BLT_PIXEL bg_color = {60, 20, 220, 0}; // Blue, Green, Red
@@ -354,7 +382,10 @@ void DrawDesktop(EFI_GRAPHICS_OUTPUT_PROTOCOL* gop) {
   // 2. 绘制标题 "Yinxuan Studio"
   DrawTitle(gop, width / 2, height / 2 - 50);
 
-  // 3. 转圈动画
+  // 3. 将静态画面一次性显示到屏幕 (解决逐像素绘制问题)
+  SyncBackBuffer(gop);
+
+  // 4. 转圈动画 (继续使用双缓冲)
   EFI_GRAPHICS_OUTPUT_BLT_PIXEL white = {255, 255, 255, 0};
   int center_x = width / 2;
   int center_y = height / 2 + 100;
@@ -363,13 +394,12 @@ void DrawDesktop(EFI_GRAPHICS_OUTPUT_PROTOCOL* gop) {
   double angle_step = 2 * PI / num_dots;
   
   // 动画循环 (持续约 5 秒)
-  // 假设 Stall(50000) = 50ms, 循环 100 次
   for (int frame = 0; frame < 100; frame++) {
-    // 清除上一帧 (重绘背景覆盖动画区域)
+    // 清除上一帧 (在缓冲区中重绘背景覆盖动画区域)
     DrawRect(gop, center_x - radius - 10, center_y - radius - 10, 
              (radius + 10) * 2, (radius + 10) * 2, bg_color);
     
-    // 绘制加载圈
+    // 绘制加载圈 (在缓冲区中)
     for (int i = 0; i < num_dots; i++) {
       // 动态角度：基础角度 + 旋转偏移
       double current_angle = i * angle_step + frame * 0.3; // 0.3 是旋转速度
@@ -377,15 +407,21 @@ void DrawDesktop(EFI_GRAPHICS_OUTPUT_PROTOCOL* gop) {
       int dx = (int)(radius * Cos(current_angle));
       int dy = (int)(radius * Sin(current_angle));
       
-      // 计算大小渐变 (模拟拖尾效果)
-      // 使用简单的相位差来决定点的大小
       int dot_r = 3;
-      // 简单的视觉效果：让点的大小随位置变化
-      
       DrawCircleFilled(gop, center_x + dx, center_y + dy, dot_r, white);
     }
     
+    // 刷新缓冲区到屏幕 (实现无闪烁动画)
+    SyncBackBuffer(gop);
+    
     gBS->Stall(50000); // 50ms 延迟
+  }
+
+  // 动画结束，关闭双缓冲
+  gUseBackBuffer = FALSE;
+  if (gBackBuffer) {
+    gBS->FreePool(gBackBuffer);
+    gBackBuffer = NULL;
   }
 }
 
