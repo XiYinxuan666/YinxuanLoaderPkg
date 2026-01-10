@@ -394,7 +394,7 @@ void DrawDesktop(EFI_GRAPHICS_OUTPUT_PROTOCOL* gop) {
   double angle_step = 2 * PI / num_dots;
   
   // 动画循环 (持续约 5 秒)
-  for (int frame = 0; frame < 100; frame++) {
+  for (int frame = 0; frame < 60; frame++) {
     // 清除上一帧 (在缓冲区中重绘背景覆盖动画区域)
     DrawRect(gop, center_x - radius - 10, center_y - radius - 10, 
              (radius + 10) * 2, (radius + 10) * 2, bg_color);
